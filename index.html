@@ -794,8 +794,14 @@
       label.textContent = '¡Casi listo!';
 
       /* 2. Save URL + name in Supabase */
-      const { error } = await db.from('photos').insert({ name, url: cloudUrl });
+      const { data: inserted, error } = await db.from('photos').insert({ name, url: cloudUrl }).select().single();
       if (error) throw error;
+
+      /* 3. Mostrar la foto inmediatamente en la galería */
+      photos.unshift(inserted);
+      renderGallery();
+      const el = document.querySelector(`.gallery-item[data-id="${inserted.id}"]`);
+      if (el) el.classList.add('new-photo');
 
       /* Reset UI */
       progress.style.display = 'none';
@@ -953,16 +959,21 @@
     photos = data || [];
     renderGallery();
 
-    /* Realtime subscription */
-    db.channel('photos_channel')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'photos' }, payload => {
-        addPhotoToGrid(payload.new);
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'photos' }, payload => {
-        photos = photos.filter(p => p.id !== payload.old.id);
+    /* Polling cada 10 segundos para ver fotos nuevas de otros */
+    setInterval(async () => {
+      const newest = photos.length > 0 ? photos[0].created_at : null;
+      const query = db.from('photos').select('*').order('created_at', { ascending: false });
+      if (newest) query.gt('created_at', newest);
+      const { data: newPhotos } = await query;
+      if (newPhotos && newPhotos.length > 0) {
+        newPhotos.forEach(p => {
+          if (!photos.find(x => x.id === p.id)) {
+            photos.unshift(p);
+          }
+        });
         renderGallery();
-      })
-      .subscribe();
+      }
+    }, 10000);
   }
 
   init();
